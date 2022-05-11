@@ -1,0 +1,294 @@
+---
+title: "Bio-logger Data from Ribbon and Spotted Seals: A Deep Dive"
+author: "Josh M. London"
+format: 
+  revealjs:
+    smaller: true
+---
+
+## Introduction
+
+:::: {.columns}
+
+::: {.column width="50%"}
+[insert family photo]
+:::
+
+::: {.column width="50%"}
+**Josh**
+
+- Originally from Tulsa, Oklahoma
+- Seattle since 1993
+- PhD from Univ. of Washington (seals, salmon, killer whales)
+
+**Shanna**
+
+- Originally from Mexico City
+- Seattle since 1994
+
+:::
+
+::::
+
+## What are Bio-loggers?
+
+:::: {.columns}
+
+::: {.column width="40%"}
+[insert photo bio-logger on seal]
+:::
+
+::: {.column width="60%"}
+- Smart-phone/Smart-watch for Seals 
+  - collect data on location and behavior
+- Must Operate in Harsh Conditions 
+  - deep dives, cold temperatures
+- Battery Life is Limited 
+  - no option for seals to plug-in & re-charge
+- Data Transfer via Satellite 
+  - no WiFi on ice floes
+:::
+
+::::
+
+## Attaching Bio-loggers to Seals
+
+#### Methods
+- Adhere to seal hair with super glue or epoxy
+- Attach to rear-flipper webbing for long-term
+
+#### Ethics and Humaneness
+
+- Marine Mammal Protection Act - Research Permit
+- US Animal Welfare Act - Institutional Review (IACUC)
+
+**Key Principle: Maximize Information Gained with Least Impact**
+
+## Bio-logger Information: Ribbon and Spotted Seals
+
+1. Movement and Space Use
+2. Dive Behavior
+3. Haul-out Behavior
+4. Oceanography
+
+## Movement and Space Use
+
+## Dive Behavior of Ribbon Seals
+
+```{r ribbon-tad-plot, warning=FALSE, message = FALSE}
+library(tidyverse)
+library(dbplyr)
+library(DBI)
+con <- dbConnect(odbc::odbc(), dsn = "PostgreSQL pep", 
+                 uid = keyringr::get_kc_account("pgpep_londonj"), 
+                 pwd = keyringr::decrypt_kc_pw("pgpep_londonj"))
+
+qry <- "SELECT a.deployid deployid,a.tad_start_dt,EXTRACT(YEAR FROM a.tad_start_dt) deploy_year, a.bin,a.pct_tad, 
+          b.deploy_dt deploy_dt, b.end_dt end_dt, b.species species
+        FROM telem.tbl_wc_histos_timeatdepth_qa a
+        LEFT JOIN telem.tbl_tag_deployments b on a.deployid = b.deployid
+        WHERE species IN ('Hf','Pl') AND 
+          (a.tad_start_dt > b.deploy_dt and a.tad_start_dt < b.end_dt)"
+
+lku_binlimits_2007 <- tibble::tribble(
+  ~bin, ~bin_upper_limit,
+  "bin1",     4,
+  "bin2",     10,
+  "bin3",     30,
+  "bin4",     50,
+  "bin5",     70,
+  "bin6",     90,
+  "bin7",     110,
+  "bin8",     130,
+  "bin9",     150,
+  "bin10",    200,
+  "bin11",    250,
+  "bin12",    300,
+  "bin13",    400,
+  "bin14",    600
+)
+
+lku_binlimits_2009 <- tibble::tribble(
+  ~bin, ~bin_upper_limit,
+  "bin1",     4,
+  "bin2",     10,
+  "bin3",     30,
+  "bin4",     50,
+  "bin5",     70,
+  "bin6",     90,
+  "bin7",     100,
+  "bin8",     150,
+  "bin9",     200,
+  "bin10",    250,
+  "bin11",    300,
+  "bin12",    400,
+  "bin13",    500,
+  "bin14",    600
+)
+
+tad_data_hf_a <- tbl(con, from = sql(qry)) %>% 
+  dplyr::filter(species == 'Hf',
+                deploy_year < 2009) %>% 
+  collect() %>% 
+  left_join(lku_binlimits_2007, by = "bin")
+
+tad_data_hf_b <- tbl(con, from = sql(qry)) %>% 
+  dplyr::filter(species == 'Hf',
+                deploy_year > 2008) %>% 
+  collect() %>% 
+  left_join(lku_binlimits_2009, by = "bin")
+
+tad_data_hf <- rbind(tad_data_hf_a, tad_data_hf_b) %>% 
+  dplyr::filter(!is.na(pct_tad)) %>% 
+  dplyr::filter(lubridate::hour(tad_start_dt) %in% c(3,9,15,21)) %>% 
+  dplyr::mutate(doy_dt = lubridate::yday(tad_start_dt) + 
+                  lubridate::hour(tad_start_dt)/24) %>% 
+  dplyr::group_by(doy_dt, bin_upper_limit) %>% 
+  dplyr::summarise(median_pct_tad = median(pct_tad, na.rm=TRUE)) %>% 
+  dplyr::filter(median_pct_tad > 0) %>% 
+  dplyr::arrange(doy_dt, bin_upper_limit) %>% 
+  dplyr::mutate(prev_depth = dplyr::lag(bin_upper_limit)) %>% 
+  dplyr::mutate(prev_depth = case_when(is.na(prev_depth) ~ 0,
+                                       TRUE ~ prev_depth)) %>% 
+  dplyr::mutate(bin_upper_limit = bin_upper_limit * -1,
+                prev_depth = prev_depth * -1)
+
+library(MetBrewer)
+
+ggplot(tad_data_hf) +
+geom_rect(aes(xmin = doy_dt-0.125, xmax = doy_dt+0.125,
+              ymin = bin_upper_limit, ymax = prev_depth,
+              fill = median_pct_tad),
+          size=0) +
+  scale_fill_gradientn(colors=met.brewer("Tam", direction = -1),
+                       guide = guide_colorbar(
+                         title = 'Percent Time',
+                         title.position = 'bottom',
+                         title.hjust = 0.5,
+                         barwidth = unit(75, units = "mm"),
+                         barheight = unit(2, units = "mm"))) +
+  scale_x_continuous(breaks = c(1, 32, 60, 91, 121, 152, 182, 214, 245, 276, 307,338),
+                     labels = c("01 Jan","01 Feb", "01 Mar", "01 Apr", "01 May", "01 Jun", "01 Jul",
+                                "01 Aug","01 Sep","01 Oct","01 Nov", "01 Dec"),
+                     expand = expansion(mult = c(0.02, 0))) +
+  xlab("") + ylab("depth (meters)") +
+  labs(
+    title = "Seasonal Changes in Percent Time at Depth for Ribbon Seals",
+    subtitle = "median percent time at depth across multiple bio-logger deployments from 2005-2016",
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+## Dive Behavior of Spotted Seals
+
+```{r spotted-tad-plot, warning=FALSE, message = FALSE}
+tad_data_pl_a <- tbl(con, from = sql(qry)) %>% 
+  dplyr::filter(species == 'Pl',
+                deploy_year < 2009) %>% 
+  collect() %>% 
+  left_join(lku_binlimits_2007, by = "bin")
+
+tad_data_pl_b <- tbl(con, from = sql(qry)) %>% 
+  dplyr::filter(species == 'Pl',
+                deploy_year > 2008) %>% 
+  collect() %>% 
+  left_join(lku_binlimits_2009, by = "bin")
+
+tad_data_pl <- rbind(tad_data_pl_a, tad_data_pl_b) %>% 
+  dplyr::filter(!is.na(pct_tad)) %>% 
+  dplyr::filter(lubridate::hour(tad_start_dt) %in% c(3,9,15,21)) %>% 
+  dplyr::mutate(doy_dt = lubridate::yday(tad_start_dt) + 
+                  lubridate::hour(tad_start_dt)/24) %>% 
+  dplyr::group_by(doy_dt, bin_upper_limit) %>% 
+  dplyr::summarise(median_pct_tad = median(pct_tad, na.rm=TRUE)) %>% 
+  dplyr::filter(median_pct_tad > 0) %>% 
+  dplyr::arrange(doy_dt, bin_upper_limit) %>% 
+  dplyr::mutate(prev_depth = dplyr::lag(bin_upper_limit)) %>% 
+  dplyr::mutate(prev_depth = case_when(is.na(prev_depth) ~ 0,
+                                       TRUE ~ prev_depth)) %>% 
+  dplyr::mutate(bin_upper_limit = bin_upper_limit * -1,
+                prev_depth = prev_depth * -1)
+
+ggplot(tad_data_pl) +
+geom_rect(aes(xmin = doy_dt-0.125, xmax = doy_dt+0.125,
+              ymin = bin_upper_limit, ymax = prev_depth,
+              fill = median_pct_tad),
+          size=0) +
+  scale_fill_gradientn(colors=met.brewer("Tam", direction = -1),
+                       guide = guide_colorbar(
+                         title = 'Percent Time',
+                         title.position = 'bottom',
+                         title.hjust = 0.5,
+                         barwidth = unit(75, units = "mm"),
+                         barheight = unit(2, units = "mm"))) +
+  scale_x_continuous(breaks = c(1, 32, 60, 91, 121, 152, 182, 214, 245, 276, 307,338),
+                     labels = c("01 Jan","01 Feb", "01 Mar", "01 Apr", "01 May", "01 Jun", "01 Jul",
+                                "01 Aug","01 Sep","01 Oct","01 Nov", "01 Dec"),
+                     expand = expansion(mult = c(0.02, 0))) +
+  xlab("") + ylab("depth (meters)") +
+  labs(
+    title = "Seasonal Changes in Percent Time at Depth for Spotted Seals",
+    subtitle = "median percent time at depth across multiple bio-logger deployments from 2005-2018",
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+## 2022 - Ribbon Seal Mother w/ Pup
+
+```{r ribbon-mom-plot, warning=FALSE, message = FALSE}
+library(wcECDF)
+
+library(here)
+
+ecdhisto <- "~/downloads/dys2022/dys2022-ECDHistos.csv" 
+
+dys2022_TAD <- ecdhisto %>% wcECDF::read_ecdf() %>% 
+  dplyr::filter(deploy_id %in% c("HF2022_1005_19U3070")) %>%
+  dplyr::mutate(facet_title = case_when(
+    deploy_id == "HF2022_1005_19U3070" ~ "Ribbon Seal Adult Female - 2022"
+  )) %>% 
+  dplyr::arrange(deploy_id, start) %>% 
+  dplyr::select(c(deploy_id,facet_title,start:percent_dry,shallow_ecdf, deep_ecdf,full_pdf)) %>% 
+  unnest(full_pdf, keep_empty = TRUE) %>% 
+  group_by(deploy_id, start, end, kind, percent_dry) %>% 
+  dplyr::arrange(deploy_id, start, depth_break) %>% 
+  # determine the next depth value
+  dplyr::mutate(next_depth = dplyr::lead(depth_break)) %>%
+  # determine previous depth for plotting
+  dplyr::mutate(prev_depth = dplyr::lag(depth_break)) %>%
+  dplyr::select(-next_depth) %>%
+  # transform depths to negative values
+  dplyr::mutate(depth_break = depth_break * -1,
+                prev_depth = prev_depth * -1)
+
+ggplot(dys2022_TAD) +
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = 0, ymax = percent_dry/10),
+            fill = "seashell3") +
+  geom_rect(aes(xmin = start, xmax = end,
+                ymin = depth_break, ymax = prev_depth,
+                fill = 60*(1 - percent_dry*0.01)*prob),
+            color = "white",size=0.25) +
+  scale_fill_gradientn(colors=met.brewer("Tam", direction = -1),
+                         guide = guide_colorbar(
+                         title = 'Minutes per Hour',
+                         title.position = 'bottom',
+                         title.hjust = 0.5,
+                         barwidth = unit(75, units = "mm"),
+                         barheight = unit(2, units = "mm"))) +
+  facet_wrap(~ facet_title, nrow=2) +
+  theme_minimal() +
+  ylab("depth (meters)") +
+  labs(title = "Dive Behavior of a Ribbon Seal Mom with Pup",
+          subtitle = "Hourly distribution of minutes spent at depth",
+          caption = "data derived from the Emperical Cummulative Distribution (ECD) of time at depth") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+## Haul-out Behavior of Ribbon and Spotted Seals
+
+## Oceanographic Data
+
