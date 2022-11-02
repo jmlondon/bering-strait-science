@@ -1,0 +1,17 @@
+/*-- scss:defaults --*/
+
+@import url('https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,200;0,400;0,600;1,200;1,400;1,600&display=swap');
+
+// fonts
+$font-family-sans-serif: 'Public Sans', sans-serif !default;
+
+// colors
+$body-color: #002364;
+$text-muted: #646464;
+$presentation-heading-color: #DB6015;
+
+/*-- scss:rules --*/
+
+.reveal .slide-logo {
+  max-height: 4rem !important;
+}
